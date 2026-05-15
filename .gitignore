@@ -1,0 +1,5 @@
+node_modules/
+.tmp/
+.pi/
+.local/
+npm-debug.log*
