@@ -16,7 +16,7 @@ interface PruneState {
 	auto: AutoPruneConfig;
 }
 
-const AUTO_PRUNE_COMPACT_INSTRUCTIONS = [
+const AUTO_PRUNE_INSTRUCTIONS = [
 	"Preserve user requests, assistant conclusions, and important reasoning.",
 	"Drop verbose tool traces and redundant intermediate details.",
 	"Keep enough context to continue the current task safely.",
@@ -113,7 +113,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
 		await runPreset(preset, ctx);
 	};
 
-	const compactIfAutoThresholdReached = (ctx: ExtensionContext, notifyWhenSkipped: boolean) => {
+	const pruneIfAutoThresholdReached = (ctx: ExtensionContext, notifyWhenSkipped: boolean) => {
 		const decision = shouldAutoPrune(ctx.getContextUsage(), state.auto);
 		if (!decision.shouldPrune) {
 			if (notifyWhenSkipped) {
@@ -125,12 +125,12 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		ctx.ui.notify(`${decision.reason}; compacting context`, "info");
-		ctx.compact({ customInstructions: AUTO_PRUNE_COMPACT_INSTRUCTIONS });
+		ctx.ui.notify(`${decision.reason}; pruning context`, "info");
+		ctx.compact({ customInstructions: AUTO_PRUNE_INSTRUCTIONS });
 	};
 
 	pi.on("agent_end", async (_event, ctx) => {
-		compactIfAutoThresholdReached(ctx, false);
+		pruneIfAutoThresholdReached(ctx, false);
 	});
 
 	pi.registerCommand("prune", {
@@ -205,7 +205,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			compactIfAutoThresholdReached(ctx, true);
+			pruneIfAutoThresholdReached(ctx, true);
 		},
 	});
 }

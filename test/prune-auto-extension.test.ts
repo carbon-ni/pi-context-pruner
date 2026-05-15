@@ -9,7 +9,7 @@ type RegisteredCommand = {
 type RegisteredHandler = (event: unknown, ctx: ExtensionContext) => Promise<void> | void;
 
 describe("/prune-auto extension flow", () => {
-	it("auto-compacts after an agent run when context usage reaches the configured threshold", async () => {
+	it("auto-prunes after an agent run when context usage reaches the configured threshold", async () => {
 		const commands = new Map<string, RegisteredCommand>();
 		const handlers = new Map<string, RegisteredHandler>();
 		const pi = {
@@ -26,15 +26,15 @@ describe("/prune-auto extension flow", () => {
 			getContextUsage: () => ({ percent: 50 }),
 		} as unknown as ExtensionCommandContext);
 
-		const compact = vi.fn();
+		const pruneContext = vi.fn();
 		await handlers.get("agent_end")?.({ type: "agent_end" }, {
 			ui: { notify },
 			getContextUsage: () => ({ percent: 75 }),
-			compact,
+			compact: pruneContext,
 		} as unknown as ExtensionContext);
 
-		expect(compact).toHaveBeenCalledOnce();
-		expect(compact).toHaveBeenCalledWith(
+		expect(pruneContext).toHaveBeenCalledOnce();
+		expect(pruneContext).toHaveBeenCalledWith(
 			expect.objectContaining({
 				customInstructions: expect.stringContaining("Preserve user requests"),
 			}),
