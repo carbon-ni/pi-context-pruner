@@ -1,5 +1,9 @@
 import { buildSessionContext } from "@mariozechner/pi-coding-agent";
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+} from "@mariozechner/pi-coding-agent";
 import { DEFAULT_CONFIG, PRESETS, cloneConfig, parsePreset } from "./config.js";
 import { distillMessages } from "./distill.js";
 import { compactSummary, configSummary, statsSummary } from "./format.js";
@@ -11,6 +15,12 @@ interface PruneState {
 	lastPreset?: PrunePreset;
 	auto: AutoPruneConfig;
 }
+
+const AUTO_PRUNE_COMPACT_INSTRUCTIONS = [
+	"Preserve user requests, assistant conclusions, and important reasoning.",
+	"Drop verbose tool traces and redundant intermediate details.",
+	"Keep enough context to continue the current task safely.",
+].join(" ");
 
 function sessionName(ctx: ExtensionCommandContext, label: string): string {
 	const current = ctx.sessionManager.getSessionName();
@@ -103,6 +113,26 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
 		await runPreset(preset, ctx);
 	};
 
+	const compactIfAutoThresholdReached = (ctx: ExtensionContext, notifyWhenSkipped: boolean) => {
+		const decision = shouldAutoPrune(ctx.getContextUsage(), state.auto);
+		if (!decision.shouldPrune) {
+			if (notifyWhenSkipped) {
+				ctx.ui.notify(
+					`Auto-prune enabled at ${state.auto.thresholdPercent}%. ${decision.reason}`,
+					"info",
+				);
+			}
+			return;
+		}
+
+		ctx.ui.notify(`${decision.reason}; compacting context`, "info");
+		ctx.compact({ customInstructions: AUTO_PRUNE_COMPACT_INSTRUCTIONS });
+	};
+
+	pi.on("agent_end", async (_event, ctx) => {
+		compactIfAutoThresholdReached(ctx, false);
+	});
+
 	pi.registerCommand("prune", {
 		description:
 			"Create a pruned fork (usage: /prune [chat|reasoning|tools|no-tools|pick|last], default: reasoning)",
@@ -175,25 +205,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			const decision = shouldAutoPrune(ctx.getContextUsage(), state.auto);
-			if (!decision.shouldPrune) {
-				ctx.ui.notify(
-					`Auto-prune enabled at ${auto.thresholdPercent}%. ${decision.reason}`,
-					"info",
-				);
-				return;
-			}
-
-			const config = cloneConfig(PRESETS.reasoning.config);
-			const { messages, stats } = distillMessages(getMessages(ctx), config);
-			if (messages.length === 0) {
-				ctx.ui.notify("Auto-prune removed everything — skipped", "warning");
-				return;
-			}
-
-			state = { ...state, lastConfig: cloneConfig(config), lastPreset: "reasoning" };
-			ctx.ui.notify(decision.reason, "info");
-			await createPrunedSession(ctx, `auto-${auto.thresholdPercent}`, config, messages, stats);
+			compactIfAutoThresholdReached(ctx, true);
 		},
 	});
 }

@@ -1,0 +1,43 @@
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { describe, expect, it, vi } from "vitest";
+import contextPruneExtension from "../src/index.js";
+
+type RegisteredCommand = {
+	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> | void;
+};
+
+type RegisteredHandler = (event: unknown, ctx: ExtensionContext) => Promise<void> | void;
+
+describe("/prune-auto extension flow", () => {
+	it("auto-compacts after an agent run when context usage reaches the configured threshold", async () => {
+		const commands = new Map<string, RegisteredCommand>();
+		const handlers = new Map<string, RegisteredHandler>();
+		const pi = {
+			registerCommand: vi.fn((name, command) => commands.set(name, command)),
+			on: vi.fn((event, handler) => handlers.set(event, handler)),
+		};
+
+		contextPruneExtension(pi as unknown as ExtensionAPI);
+
+		const notify = vi.fn();
+		await commands.get("prune-auto")?.handler("70", {
+			hasUI: true,
+			ui: { notify },
+			getContextUsage: () => ({ percent: 50 }),
+		} as unknown as ExtensionCommandContext);
+
+		const compact = vi.fn();
+		await handlers.get("agent_end")?.({ type: "agent_end" }, {
+			ui: { notify },
+			getContextUsage: () => ({ percent: 75 }),
+			compact,
+		} as unknown as ExtensionContext);
+
+		expect(compact).toHaveBeenCalledOnce();
+		expect(compact).toHaveBeenCalledWith(
+			expect.objectContaining({
+				customInstructions: expect.stringContaining("Preserve user requests"),
+			}),
+		);
+	});
+});
