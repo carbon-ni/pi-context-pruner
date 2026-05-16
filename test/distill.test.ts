@@ -102,6 +102,47 @@ describe("distillMessages", () => {
 		expect(stats.sourceMessages).toBe(4);
 	});
 
+	it("keeps loaded skill reads even when tool results are otherwise excluded", () => {
+		const messages = [
+			makeUser("Use skill"),
+			makeAssistant([
+				{
+					type: "toolCall",
+					name: "read",
+					arguments: { path: "/Users/me/.pi/agent/skills/git-committer/SKILL.md" },
+				},
+			]),
+			makeToolResult("read", "# Git Committer\nSkill instructions"),
+			makeAssistant([{ type: "text", text: "Loaded" }]),
+		];
+
+		const { messages: result } = distillMessages(messages, PRESETS.reasoning.config);
+
+		expect(result).toHaveLength(4);
+		expect(result[1].role).toBe("assistant");
+		expect(result[2].role).toBe("toolResult");
+	});
+
+	it("keeps AGENTS.md reads even when tool results are otherwise excluded", () => {
+		const messages = [
+			makeUser("Check repo instructions"),
+			makeAssistant([
+				{
+					type: "toolCall",
+					name: "read",
+					arguments: { path: "/repo/AGENTS.md" },
+				},
+			]),
+			makeToolResult("read", "# Agent instructions"),
+		];
+
+		const { messages: result } = distillMessages(messages, PRESETS.chat.config);
+
+		expect(result).toHaveLength(3);
+		expect(result[1].role).toBe("assistant");
+		expect(result[2].role).toBe("toolResult");
+	});
+
 	it("truncates tool results when maxChars set", () => {
 		const messages = [
 			makeUser("read file"),

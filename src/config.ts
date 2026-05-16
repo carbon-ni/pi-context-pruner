@@ -7,6 +7,7 @@ export const DEFAULT_CONFIG: PruneConfig = {
 	includeAssistantFinal: true,
 	includeToolCalls: false,
 	includeToolResults: false,
+	includeLoadedInstructions: true,
 	toolResultTruncation: "head",
 };
 

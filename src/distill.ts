@@ -47,6 +47,19 @@ function approxTokens(messages: AgentMessage[]): number {
 	return messages.reduce((sum, m) => sum + estimateTokens(m), 0);
 }
 
+function getToolPath(args: unknown): string | undefined {
+	if (!args || typeof args !== "object" || !("path" in args)) return undefined;
+	const path = (args as { path?: unknown }).path;
+	return typeof path === "string" ? path : undefined;
+}
+
+function isLoadedInstructionRead(part: AssistantMessage["content"][number]): boolean {
+	if (part.type !== "toolCall" || part.name !== "read") return false;
+	const path = getToolPath(part.arguments);
+	if (!path) return false;
+	return path.endsWith("/AGENTS.md") || path.endsWith("AGENTS.md") || path.endsWith("/SKILL.md");
+}
+
 export function distillMessages(
 	messages: AgentMessage[],
 	config: PruneConfig,
@@ -59,6 +72,8 @@ export function distillMessages(
 		sourceApproxTokens: approxTokens(messages),
 		keptApproxTokens: 0,
 	};
+
+	let keepNextToolResult = false;
 
 	for (const message of messages) {
 		if (isUser(message)) {
@@ -73,6 +88,7 @@ export function distillMessages(
 
 		if (isAssistant(message)) {
 			const hasToolCall = message.content.some((p) => p.type === "toolCall");
+			const hasLoadedInstructionRead = message.content.some(isLoadedInstructionRead);
 			const kept: AssistantMessage["content"] = [];
 
 			for (const part of message.content) {
@@ -87,7 +103,10 @@ export function distillMessages(
 					if (hasToolCall && config.includeAssistantComment) kept.push({ ...part });
 					if (!hasToolCall && config.includeAssistantFinal) kept.push({ ...part });
 				}
-				if (part.type === "toolCall" && config.includeToolCalls) {
+				if (
+					part.type === "toolCall" &&
+					(config.includeToolCalls || (config.includeLoadedInstructions && isLoadedInstructionRead(part)))
+				) {
 					kept.push(part);
 				}
 			}
@@ -104,18 +123,19 @@ export function distillMessages(
 				stopReason: kept.some((p) => p.type === "toolCall") ? "toolUse" : "stop",
 				errorMessage: undefined,
 			});
+			keepNextToolResult = config.includeLoadedInstructions && hasLoadedInstructionRead;
 			stats.keptMessages++;
 			continue;
 		}
 
 		if (isToolResult(message)) {
-			if (!config.includeToolResults) {
+			if (!config.includeToolResults && !keepNextToolResult) {
 				stats.droppedMessages++;
 				continue;
 			}
 
 			let content = [...message.content];
-			if (config.toolResultMaxChars) {
+			if (config.toolResultMaxChars && !keepNextToolResult) {
 				const images = content.filter((p): p is ImageContent => p.type === "image");
 				const text = content
 					.filter((p): p is TextContent => p.type === "text")
@@ -129,7 +149,8 @@ export function distillMessages(
 				content = [{ type: "text", text: truncated }, ...images];
 			}
 
-			result.push({ ...message, content, details: { __pruned: true } });
+			result.push({ ...message, content, details: { __pruned: !keepNextToolResult } });
+			keepNextToolResult = false;
 			stats.keptMessages++;
 			continue;
 		}

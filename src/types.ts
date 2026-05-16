@@ -27,6 +27,7 @@ export interface PruneConfig {
 	includeAssistantFinal: boolean;
 	includeToolCalls: boolean;
 	includeToolResults: boolean;
+	includeLoadedInstructions: boolean;
 	toolResultMaxChars?: number;
 	toolResultTruncation: TruncationMode;
 }
