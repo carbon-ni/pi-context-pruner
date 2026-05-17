@@ -22,9 +22,46 @@ const AUTO_PRUNE_INSTRUCTIONS = [
 	"Keep enough context to continue the current task safely.",
 ].join(" ");
 
-function sessionName(ctx: ExtensionCommandContext, label: string): string {
-	const current = ctx.sessionManager.getSessionName();
-	return current ? `${current} [prune:${label}]` : `prune:${label}`;
+const PRUNE_MARKER_PATTERN = /prune:[^\]\s]+(?:\s·\s×(\d+)\s·\s-\d+%)?/g;
+const PRUNE_SUFFIX_PATTERN = /\s+\[prune:[^\]]+\]$/;
+const PRUNE_ONLY_PATTERN = /^prune:[^\]\s]+(?:\s·\s×\d+\s·\s-\d+%)?$/;
+
+function pruneCount(current: string | undefined): number {
+	const markers = current?.matchAll(PRUNE_MARKER_PATTERN) ?? [];
+	let count = 0;
+	for (const marker of markers) {
+		count = Math.max(count, marker[1] ? Number(marker[1]) : 1);
+	}
+	return count;
+}
+
+function reductionPercent(stats: PruneStats): number {
+	if (stats.sourceApproxTokens <= 0) return 0;
+	return Math.max(
+		0,
+		Math.round(
+			((stats.sourceApproxTokens - stats.keptApproxTokens) / stats.sourceApproxTokens) * 100,
+		),
+	);
+}
+
+export function prunedSessionName(
+	current: string | undefined,
+	label: string,
+	stats: PruneStats,
+): string {
+	let base = current?.trim() ?? "";
+	while (PRUNE_SUFFIX_PATTERN.test(base)) {
+		base = base.replace(PRUNE_SUFFIX_PATTERN, "").trimEnd();
+	}
+
+	const tag = `prune:${label} · ×${pruneCount(current) + 1} · -${reductionPercent(stats)}%`;
+	if (!base || PRUNE_ONLY_PATTERN.test(base)) return tag;
+	return `${base} [${tag}]`;
+}
+
+function sessionName(ctx: ExtensionCommandContext, label: string, stats: PruneStats): string {
+	return prunedSessionName(ctx.sessionManager.getSessionName(), label, stats);
 }
 
 async function createPrunedSession(
@@ -37,7 +74,7 @@ async function createPrunedSession(
 	const sourceFile = ctx.sessionManager.getSessionFile();
 	const leafId = ctx.sessionManager.getLeafId();
 	const sourceContext = buildSessionContext(ctx.sessionManager.getEntries(), leafId);
-	const name = sessionName(ctx, label);
+	const name = sessionName(ctx, label, stats);
 
 	await ctx.waitForIdle();
 	const result = await ctx.newSession({
