@@ -20,6 +20,15 @@ export type MessageCategory =
 	| "tool_call"
 	| "tool_result";
 
+export interface ToolKeepRule {
+	tool: string | RegExp;
+	args?: {
+		pathEndsWith?: string[];
+		pathIncludes?: string[];
+	};
+	maxChars?: number;
+}
+
 export interface PruneConfig {
 	includeUser: boolean;
 	includeAssistantThinking: boolean;
@@ -28,6 +37,7 @@ export interface PruneConfig {
 	includeToolCalls: boolean;
 	includeToolResults: boolean;
 	includeLoadedInstructions: boolean;
+	toolResultKeepRules: ToolKeepRule[];
 	toolResultMaxChars?: number;
 	toolResultTruncation: TruncationMode;
 }

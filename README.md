@@ -34,3 +34,33 @@ Auto-prune is disabled by default. Enable it explicitly:
 - `/prune-auto 0` — disable
 
 When enabled, it uses the `reasoning` preset: user messages, assistant reasoning, comments, and final answers, without full tool traces.
+
+## Configuration
+
+Config files are optional. Local config overrides global config.
+
+- local: `.pi/context-pruner.json`
+- global: `~/.pi/agent/context-pruner.json`
+
+Config values are shallow overrides. `toolResultKeepRules` replaces the default rule list.
+
+Example:
+
+```json
+{
+  "toolResultMaxChars": 4000,
+  "toolResultKeepRules": [
+    { "tool": "read", "args": { "pathEndsWith": ["package.json", "tsconfig.json"] }, "maxChars": 4000 }
+  ]
+}
+```
+
+## Tool result whitelist
+
+Default pruning drops most tool results, but keeps selected context-bearing results:
+
+- loaded instructions: `read` calls for `AGENTS.md` and `SKILL.md` files
+- small project config reads: `package.json`, `tsconfig.json` (truncated)
+- AST/LSP exploration tools: `ast_*`, `code_*` (truncated)
+
+Use `/prune tools` when you need every tool call and result.
