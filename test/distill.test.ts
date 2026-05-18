@@ -143,6 +143,51 @@ describe("distillMessages", () => {
 		expect(result[2].role).toBe("toolResult");
 	});
 
+	it("keeps whitelisted read results with rule truncation", () => {
+		const messages = [
+			makeUser("inspect package"),
+			makeAssistant([{ type: "toolCall", name: "read", arguments: { path: "/repo/package.json" } }]),
+			makeToolResult("read", "A".repeat(200)),
+		];
+
+		const { messages: result } = distillMessages(messages, PRESETS.reasoning.config);
+
+		expect(result).toHaveLength(3);
+		expect(result[1].role).toBe("assistant");
+		expect(result[2].role).toBe("toolResult");
+		const toolResult = result[2] as { content: Array<{ type: string; text: string }> };
+		const text = toolResult.content.find((p) => p.type === "text")!.text;
+		expect(text.length).toBeLessThan(200);
+		expect(text).toContain("[pruned");
+	});
+
+	it("keeps whitelisted AST tool results", () => {
+		const messages = [
+			makeUser("map file"),
+			makeAssistant([{ type: "toolCall", name: "ast_context_pack", arguments: {} }]),
+			makeToolResult("ast_context_pack", "symbols"),
+		];
+
+		const { messages: result } = distillMessages(messages, PRESETS.reasoning.config);
+
+		expect(result).toHaveLength(3);
+		expect(result[1].role).toBe("assistant");
+		expect(result[2].role).toBe("toolResult");
+	});
+
+	it("drops non-whitelisted tool results", () => {
+		const messages = [
+			makeUser("read file"),
+			makeAssistant([{ type: "toolCall", name: "read", arguments: { path: "/repo/src/index.ts" } }]),
+			makeToolResult("read", "source"),
+		];
+
+		const { messages: result } = distillMessages(messages, PRESETS.reasoning.config);
+
+		expect(result).toHaveLength(1);
+		expect(result[0].role).toBe("user");
+	});
+
 	it("truncates tool results when maxChars set", () => {
 		const messages = [
 			makeUser("read file"),

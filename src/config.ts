@@ -1,4 +1,14 @@
-import type { PruneConfig, PrunePreset, CategoryMeta } from "./types.js";
+import type { PruneConfig, PrunePreset, CategoryMeta, ToolKeepRule } from "./types.js";
+
+export const DEFAULT_TOOL_RESULT_KEEP_RULES: ToolKeepRule[] = [
+	{
+		tool: "read",
+		args: { pathEndsWith: ["package.json", "tsconfig.json"] },
+		maxChars: 100,
+	},
+	{ tool: /^ast_/, maxChars: 6000 },
+	{ tool: /^code_/, maxChars: 6000 },
+];
 
 export const DEFAULT_CONFIG: PruneConfig = {
 	includeUser: true,
@@ -8,6 +18,7 @@ export const DEFAULT_CONFIG: PruneConfig = {
 	includeToolCalls: false,
 	includeToolResults: false,
 	includeLoadedInstructions: true,
+	toolResultKeepRules: DEFAULT_TOOL_RESULT_KEEP_RULES,
 	toolResultTruncation: "head",
 };
 
@@ -93,7 +104,7 @@ export const CATEGORY_META: CategoryMeta[] = [
 ];
 
 export function cloneConfig(config: PruneConfig): PruneConfig {
-	return { ...config };
+	return { ...config, toolResultKeepRules: [...config.toolResultKeepRules] };
 }
 
 export function parsePreset(args: string): PrunePreset | "last" | undefined {

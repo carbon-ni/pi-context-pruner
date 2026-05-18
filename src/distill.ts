@@ -8,6 +8,7 @@ import type {
 	PruneConfig,
 	PruneStats,
 	TextContent,
+	ToolKeepRule,
 	ToolResultMessage,
 	UserMessage,
 } from "./types.js";
@@ -53,6 +54,28 @@ function getToolPath(args: unknown): string | undefined {
 	return typeof path === "string" ? path : undefined;
 }
 
+function matchesToolName(rule: ToolKeepRule, toolName: string): boolean {
+	return typeof rule.tool === "string" ? rule.tool === toolName : rule.tool.test(toolName);
+}
+
+function matchesPathRule(rule: ToolKeepRule, path: string | undefined): boolean {
+	if (!rule.args) return true;
+	if (!path) return false;
+	const { pathEndsWith = [], pathIncludes = [] } = rule.args;
+	return pathEndsWith.some((suffix) => path.endsWith(suffix)) || pathIncludes.some((part) => path.includes(part));
+}
+
+function getToolKeepRule(
+	part: AssistantMessage["content"][number],
+	config: PruneConfig,
+): ToolKeepRule | undefined {
+	if (part.type !== "toolCall") return undefined;
+	const path = getToolPath(part.arguments);
+	return config.toolResultKeepRules.find(
+		(rule) => matchesToolName(rule, part.name) && matchesPathRule(rule, path),
+	);
+}
+
 function isLoadedInstructionRead(part: AssistantMessage["content"][number]): boolean {
 	if (part.type !== "toolCall" || part.name !== "read") return false;
 	const path = getToolPath(part.arguments);
@@ -73,7 +96,9 @@ export function distillMessages(
 		keptApproxTokens: 0,
 	};
 
+	let nextToolResultRule: ToolKeepRule | undefined;
 	let keepNextToolResult = false;
+	let keepNextToolResultUnpruned = false;
 
 	for (const message of messages) {
 		if (isUser(message)) {
@@ -89,6 +114,9 @@ export function distillMessages(
 		if (isAssistant(message)) {
 			const hasToolCall = message.content.some((p) => p.type === "toolCall");
 			const hasLoadedInstructionRead = message.content.some(isLoadedInstructionRead);
+			const matchingToolKeepRule = message.content
+				.map((part) => getToolKeepRule(part, config))
+				.find((rule): rule is ToolKeepRule => Boolean(rule));
 			const kept: AssistantMessage["content"] = [];
 
 			for (const part of message.content) {
@@ -105,7 +133,9 @@ export function distillMessages(
 				}
 				if (
 					part.type === "toolCall" &&
-					(config.includeToolCalls || (config.includeLoadedInstructions && isLoadedInstructionRead(part)))
+					(config.includeToolCalls ||
+						getToolKeepRule(part, config) ||
+						(config.includeLoadedInstructions && isLoadedInstructionRead(part)))
 				) {
 					kept.push(part);
 				}
@@ -123,7 +153,9 @@ export function distillMessages(
 				stopReason: kept.some((p) => p.type === "toolCall") ? "toolUse" : "stop",
 				errorMessage: undefined,
 			});
-			keepNextToolResult = config.includeLoadedInstructions && hasLoadedInstructionRead;
+			nextToolResultRule = matchingToolKeepRule;
+			keepNextToolResultUnpruned = config.includeLoadedInstructions && hasLoadedInstructionRead;
+			keepNextToolResult = Boolean(nextToolResultRule) || keepNextToolResultUnpruned;
 			stats.keptMessages++;
 			continue;
 		}
@@ -135,22 +167,21 @@ export function distillMessages(
 			}
 
 			let content = [...message.content];
-			if (config.toolResultMaxChars && !keepNextToolResult) {
+			const maxChars = nextToolResultRule?.maxChars ?? config.toolResultMaxChars;
+			if (maxChars && !keepNextToolResultUnpruned) {
 				const images = content.filter((p): p is ImageContent => p.type === "image");
 				const text = content
 					.filter((p): p is TextContent => p.type === "text")
 					.map((p) => p.text)
 					.join("\n\n");
-				const truncated = truncateText(
-					text,
-					config.toolResultMaxChars,
-					config.toolResultTruncation,
-				);
+				const truncated = truncateText(text, maxChars, config.toolResultTruncation);
 				content = [{ type: "text", text: truncated }, ...images];
 			}
 
 			result.push({ ...message, content, details: { __pruned: !keepNextToolResult } });
+			nextToolResultRule = undefined;
 			keepNextToolResult = false;
+			keepNextToolResultUnpruned = false;
 			stats.keptMessages++;
 			continue;
 		}
