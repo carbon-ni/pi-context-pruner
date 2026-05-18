@@ -4,7 +4,7 @@ import type {
 	ExtensionCommandContext,
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
-import { DEFAULT_CONFIG, PRESETS, cloneConfig, parsePreset } from "./config.js";
+import { buildPresets, cloneConfig, loadConfig, parsePreset } from "./config.js";
 import { distillMessages } from "./distill.js";
 import { compactSummary, configSummary, statsSummary } from "./format.js";
 import { configureAutoPrune, shouldAutoPrune, type AutoPruneConfig } from "./auto.js";
@@ -110,8 +110,10 @@ async function createPrunedSession(
 }
 
 export default function contextPruneExtension(pi: ExtensionAPI) {
+	const defaultConfig = loadConfig();
+	const presets = buildPresets(defaultConfig);
 	let state: PruneState = {
-		lastConfig: cloneConfig(DEFAULT_CONFIG),
+		lastConfig: cloneConfig(defaultConfig),
 		auto: { enabled: false, thresholdPercent: 0 },
 	};
 
@@ -124,7 +126,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
 	};
 
 	const runPreset = async (preset: PrunePreset, ctx: ExtensionCommandContext) => {
-		const config = cloneConfig(PRESETS[preset].config);
+		const config = cloneConfig(presets[preset].config);
 		const { messages, stats } = distillMessages(getMessages(ctx), config);
 
 		if (messages.length === 0) {
@@ -141,7 +143,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
 	};
 
 	const pickAndRun = async (ctx: ExtensionCommandContext) => {
-		const options = Object.entries(PRESETS).map(
+		const options = Object.entries(presets).map(
 			([key, { description }]) => `${key} — ${description}`,
 		);
 		const selection = await ctx.ui.select("Prune preset", options);
