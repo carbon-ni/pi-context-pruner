@@ -55,7 +55,9 @@ function getToolPath(args: unknown): string | undefined {
 }
 
 function matchesToolName(rule: ToolKeepRule, toolName: string): boolean {
-	return typeof rule.tool === "string" ? rule.tool === toolName : rule.tool.test(toolName);
+	if (typeof rule.tool !== "string") return rule.tool.test(toolName);
+	if (rule.tool.endsWith("*")) return toolName.startsWith(rule.tool.slice(0, -1));
+	return rule.tool === toolName;
 }
 
 function matchesPathRule(rule: ToolKeepRule, path: string | undefined): boolean {

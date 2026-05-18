@@ -3,6 +3,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { getConfigPaths, loadConfig } from "../src/config.js";
+import { distillMessages } from "../src/distill.js";
+import type { AgentMessage } from "../src/types.js";
+
+function makeUser(text: string): AgentMessage {
+	return { role: "user", content: [{ type: "text", text }] } as AgentMessage;
+}
+
+function makeAssistantToolCall(name: string): AgentMessage {
+	return { role: "assistant", content: [{ type: "toolCall", name, arguments: {} }] } as AgentMessage;
+}
+
+function makeToolResult(toolName: string, text: string): AgentMessage {
+	return { role: "toolResult", toolName, content: [{ type: "text", text }] } as AgentMessage;
+}
 
 describe("config file loading", () => {
 	it("uses local .pi/context-pruner.json over global ~/.pi/agent/context-pruner.json", () => {
@@ -47,5 +61,26 @@ describe("config file loading", () => {
 			expect.any(Error),
 		);
 		warn.mockRestore();
+	});
+
+	it("supports wildcard tool names from JSON config", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "context-pruner-wildcard-cwd-"));
+		const home = mkdtempSync(join(tmpdir(), "context-pruner-wildcard-home-"));
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(
+			join(cwd, ".pi", "context-pruner.json"),
+			JSON.stringify({ toolResultKeepRules: [{ tool: "ast_*" }, { tool: "code_*" }] }),
+		);
+		const messages = [
+			makeUser("explore"),
+			makeAssistantToolCall("ast_context_pack"),
+			makeToolResult("ast_context_pack", "symbols"),
+			makeAssistantToolCall("code_symbol_context"),
+			makeToolResult("code_symbol_context", "context"),
+		];
+
+		const { messages: result } = distillMessages(messages, loadConfig({ cwd, home }));
+
+		expect(result).toHaveLength(5);
 	});
 });
