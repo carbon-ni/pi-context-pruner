@@ -11,7 +11,7 @@ function makeAssistant(
 	parts: Array<
 		| { type: "text"; text: string }
 		| { type: "thinking"; thinking: string }
-		| { type: "toolCall"; name: string; arguments: Record<string, unknown> }
+		| { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }
 	>,
 ): AgentMessage {
 	return {
@@ -20,9 +20,10 @@ function makeAssistant(
 	} as AgentMessage;
 }
 
-function makeToolResult(toolName: string, text: string): AgentMessage {
+function makeToolResult(toolCallId: string, toolName: string, text: string): AgentMessage {
 	return {
 		role: "toolResult",
+		toolCallId,
 		toolName,
 		content: [{ type: "text", text }],
 	} as AgentMessage;
@@ -34,9 +35,9 @@ function makeMessages() {
 		makeAssistant([
 			{ type: "thinking", thinking: "Let me think about this" },
 			{ type: "text", text: "I'll help you with that" },
-			{ type: "toolCall", name: "read", arguments: { path: "/foo.txt" } },
+			{ type: "toolCall", id: "call_1", name: "read", arguments: { path: "/foo.txt" } },
 		]),
-		makeToolResult("read", "file contents here"),
+		makeToolResult("call_1", "read", "file contents here"),
 		makeAssistant([{ type: "text", text: "Done!" }]),
 	];
 }
@@ -108,11 +109,12 @@ describe("distillMessages", () => {
 			makeAssistant([
 				{
 					type: "toolCall",
+					id: "call_skill",
 					name: "read",
 					arguments: { path: "/Users/me/.pi/agent/skills/git-committer/SKILL.md" },
 				},
 			]),
-			makeToolResult("read", "# Git Committer\nSkill instructions"),
+			makeToolResult("call_skill", "read", "# Git Committer\nSkill instructions"),
 			makeAssistant([{ type: "text", text: "Loaded" }]),
 		];
 
@@ -129,11 +131,12 @@ describe("distillMessages", () => {
 			makeAssistant([
 				{
 					type: "toolCall",
+					id: "call_agents",
 					name: "read",
 					arguments: { path: "/repo/AGENTS.md" },
 				},
 			]),
-			makeToolResult("read", "# Agent instructions"),
+			makeToolResult("call_agents", "read", "# Agent instructions"),
 		];
 
 		const { messages: result } = distillMessages(messages, PRESETS.chat.config);
@@ -146,8 +149,8 @@ describe("distillMessages", () => {
 	it("keeps whitelisted read results with rule truncation", () => {
 		const messages = [
 			makeUser("inspect package"),
-			makeAssistant([{ type: "toolCall", name: "read", arguments: { path: "/repo/package.json" } }]),
-			makeToolResult("read", "A".repeat(200)),
+			makeAssistant([{ type: "toolCall", id: "call_pkg", name: "read", arguments: { path: "/repo/package.json" } }]),
+			makeToolResult("call_pkg", "read", "A".repeat(200)),
 		];
 
 		const { messages: result } = distillMessages(messages, PRESETS.reasoning.config);
@@ -164,8 +167,8 @@ describe("distillMessages", () => {
 	it("keeps whitelisted AST tool results", () => {
 		const messages = [
 			makeUser("map file"),
-			makeAssistant([{ type: "toolCall", name: "ast_context_pack", arguments: {} }]),
-			makeToolResult("ast_context_pack", "symbols"),
+			makeAssistant([{ type: "toolCall", id: "call_ast", name: "ast_context_pack", arguments: {} }]),
+			makeToolResult("call_ast", "ast_context_pack", "symbols"),
 		];
 
 		const { messages: result } = distillMessages(messages, PRESETS.reasoning.config);
@@ -178,8 +181,8 @@ describe("distillMessages", () => {
 	it("drops non-whitelisted tool results", () => {
 		const messages = [
 			makeUser("read file"),
-			makeAssistant([{ type: "toolCall", name: "read", arguments: { path: "/repo/src/index.ts" } }]),
-			makeToolResult("read", "source"),
+			makeAssistant([{ type: "toolCall", id: "call_src", name: "read", arguments: { path: "/repo/src/index.ts" } }]),
+			makeToolResult("call_src", "read", "source"),
 		];
 
 		const { messages: result } = distillMessages(messages, PRESETS.reasoning.config);
@@ -191,8 +194,8 @@ describe("distillMessages", () => {
 	it("truncates tool results when maxChars set", () => {
 		const messages = [
 			makeUser("read file"),
-			makeAssistant([{ type: "toolCall", name: "read", arguments: {} }]),
-			makeToolResult("read", "A".repeat(200)),
+			makeAssistant([{ type: "toolCall", id: "call_trunc", name: "read", arguments: {} }]),
+			makeToolResult("call_trunc", "read", "A".repeat(200)),
 		];
 		const config = {
 			...PRESETS.tools.config,
@@ -203,5 +206,30 @@ describe("distillMessages", () => {
 		const text = toolResult.content.find((p) => p.type === "text")!.text;
 		expect(text.length).toBeLessThan(200);
 		expect(text).toContain("[pruned");
+	});
+
+	it("drops tool results for tool calls that were not kept, even when they arrive first", () => {
+		// Assistant has 2 tool calls: non-whitelisted bash first, whitelisted AST second
+		// Tool results arrive in reverse: bash result first, ast result second
+		// Bug: keepNextToolResult boolean keeps the FIRST result regardless of which call it belongs to
+		const messages = [
+			makeUser("explore"),
+			makeAssistant([
+				{ type: "text", text: "Let me check..." },
+				{ type: "toolCall", id: "call_bash", name: "bash", arguments: { command: "ls" } },
+				{ type: "toolCall", id: "call_ast", name: "ast_context_pack", arguments: {} },
+			]),
+			makeToolResult("call_bash", "bash", "src test"),
+			makeToolResult("call_ast", "ast_context_pack", "symbols"),
+		];
+
+		const { messages: result } = distillMessages(messages, PRESETS.reasoning.config);
+
+		// ast call + comment kept, bash call dropped
+		// ast result kept (whitelisted), bash result dropped (not whitelisted)
+		expect(result).toHaveLength(3); // user + asst(ast call+comment) + ast result
+		expect(result[1].role).toBe("assistant");
+		expect(result[2].role).toBe("toolResult");
+		expect((result[2] as { toolCallId?: string }).toolCallId).toBe("call_ast");
 	});
 });

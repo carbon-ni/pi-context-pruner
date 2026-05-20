@@ -98,9 +98,8 @@ export function distillMessages(
 		keptApproxTokens: 0,
 	};
 
-	let nextToolResultRule: ToolKeepRule | undefined;
-	let keepNextToolResult = false;
-	let keepNextToolResultUnpruned = false;
+	// Track which tool call IDs were kept, and their keep rules (for truncation).
+	const keptToolCallIds = new Map<string, { rule?: ToolKeepRule; unpruned: boolean }>();
 
 	for (const message of messages) {
 		if (isUser(message)) {
@@ -115,11 +114,10 @@ export function distillMessages(
 
 		if (isAssistant(message)) {
 			const hasToolCall = message.content.some((p) => p.type === "toolCall");
-			const hasLoadedInstructionRead = message.content.some(isLoadedInstructionRead);
-			const matchingToolKeepRule = message.content
-				.map((part) => getToolKeepRule(part, config))
-				.find((rule): rule is ToolKeepRule => Boolean(rule));
 			const kept: AssistantMessage["content"] = [];
+
+			// Clear old kept IDs — new assistant message starts a new round.
+			keptToolCallIds.clear();
 
 			for (const part of message.content) {
 				if (
@@ -140,6 +138,10 @@ export function distillMessages(
 						(config.includeLoadedInstructions && isLoadedInstructionRead(part)))
 				) {
 					kept.push(part);
+					// Record this tool call ID so we know to keep its result.
+					const rule = getToolKeepRule(part, config);
+					const unpruned = config.includeLoadedInstructions && isLoadedInstructionRead(part);
+					keptToolCallIds.set(part.id, { rule, unpruned });
 				}
 			}
 
@@ -155,22 +157,22 @@ export function distillMessages(
 				stopReason: kept.some((p) => p.type === "toolCall") ? "toolUse" : "stop",
 				errorMessage: undefined,
 			});
-			nextToolResultRule = matchingToolKeepRule;
-			keepNextToolResultUnpruned = config.includeLoadedInstructions && hasLoadedInstructionRead;
-			keepNextToolResult = Boolean(nextToolResultRule) || keepNextToolResultUnpruned;
 			stats.keptMessages++;
 			continue;
 		}
 
 		if (isToolResult(message)) {
-			if (!config.includeToolResults && !keepNextToolResult) {
+			const keepInfo = keptToolCallIds.get(message.toolCallId);
+			const shouldKeep = config.includeToolResults || Boolean(keepInfo);
+
+			if (!shouldKeep) {
 				stats.droppedMessages++;
 				continue;
 			}
 
 			let content = [...message.content];
-			const maxChars = nextToolResultRule?.maxChars ?? config.toolResultMaxChars;
-			if (maxChars && !keepNextToolResultUnpruned) {
+			const maxChars = keepInfo?.rule?.maxChars ?? config.toolResultMaxChars;
+			if (maxChars && !keepInfo?.unpruned) {
 				const images = content.filter((p): p is ImageContent => p.type === "image");
 				const text = content
 					.filter((p): p is TextContent => p.type === "text")
@@ -180,10 +182,9 @@ export function distillMessages(
 				content = [{ type: "text", text: truncated }, ...images];
 			}
 
-			result.push({ ...message, content, details: { __pruned: !keepNextToolResult } });
-			nextToolResultRule = undefined;
-			keepNextToolResult = false;
-			keepNextToolResultUnpruned = false;
+			// Remove from kept set so each matched result consumes its ID once.
+			keptToolCallIds.delete(message.toolCallId);
+			result.push({ ...message, content, details: { __pruned: !keepInfo } });
 			stats.keptMessages++;
 			continue;
 		}
