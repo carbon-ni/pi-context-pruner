@@ -1,37 +1,37 @@
 {
-	"name": "pi-context-pruner",
-	"version": "0.1.0",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"check": "tsc -p tsconfig.json",
-		"lint": "eslint .",
-		"lint:fix": "eslint . --fix",
-		"format": "prettier . --write",
-		"format:check": "prettier . --check",
-		"test": "vitest run"
-	},
-	"devDependencies": {
-		"@eslint/js": "^10.0.1",
-		"@mariozechner/pi-agent-core": "^0.73.1",
-		"@mariozechner/pi-ai": "^0.73.1",
-		"@mariozechner/pi-coding-agent": "^0.73.1",
-		"@mariozechner/pi-tui": "^0.73.1",
-		"@types/node": "^22.15.3",
-		"@typescript-eslint/eslint-plugin": "^8.59.2",
-		"@typescript-eslint/parser": "^8.59.2",
-		"eslint": "^10.3.0",
-		"globals": "^17.6.0",
-		"prettier": "^3.8.3",
-		"typescript": "^5.8.3",
-		"vitest": "^3.1.1"
-	},
-	"peerDependencies": {
-		"@mariozechner/pi-coding-agent": "*"
-	},
-	"pi": {
-		"extensions": [
-			"./src/index.ts"
-		]
-	}
+  "name": "pi-context-pruner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@mariozechner/pi-agent-core": "^0.73.1",
+    "@mariozechner/pi-ai": "^0.73.1",
+    "@mariozechner/pi-coding-agent": "^0.73.1",
+    "@mariozechner/pi-tui": "^0.73.1",
+    "@types/node": "^22.15.3",
+    "@typescript-eslint/eslint-plugin": "^8.59.2",
+    "@typescript-eslint/parser": "^8.59.2",
+    "eslint": "^10.3.0",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.1"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
 }

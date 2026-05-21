@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo ">> pre-commit: running quality gates..."
+
+make format
+if ! make check 2>&1; then
+  echo "!! Typecheck failed. Fix errors before committing."
+  exit 1
+fi
+
+if ! make lint 2>&1; then
+  echo "!! Lint failed. Run 'make fix' to auto-fix."
+  exit 1
+fi
+
+if ! make test 2>&1; then
+  echo "!! Tests failed."
+  exit 1
+fi
+
+echo ">> pre-commit: all checks passed."

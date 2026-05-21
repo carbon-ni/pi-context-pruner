@@ -1,198 +1,229 @@
 import { estimateTokens } from "@mariozechner/pi-coding-agent";
 import type { Usage } from "@mariozechner/pi-ai";
 import type {
-	AgentMessage,
-	AssistantMessage,
-	ImageContent,
-	Message,
-	PruneConfig,
-	PruneStats,
-	TextContent,
-	ToolKeepRule,
-	ToolResultMessage,
-	UserMessage,
+  AgentMessage,
+  AssistantMessage,
+  ImageContent,
+  Message,
+  PruneConfig,
+  PruneStats,
+  TextContent,
+  ToolKeepRule,
+  ToolResultMessage,
+  UserMessage,
 } from "./types.js";
 
 const ZERO_USAGE: Usage = {
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-	totalTokens: 0,
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
 function isUser(m: AgentMessage): m is UserMessage {
-	return m.role === "user";
+  return m.role === "user";
 }
 function isAssistant(m: AgentMessage): m is AssistantMessage {
-	return m.role === "assistant";
+  return m.role === "assistant";
 }
 function isToolResult(m: AgentMessage): m is ToolResultMessage {
-	return m.role === "toolResult";
+  return m.role === "toolResult";
 }
 
 function trimText(text: string): string {
-	return text.replace(/\r\n/g, "\n").trim();
+  return text.replace(/\r\n/g, "\n").trim();
 }
 
-function truncateText(text: string, maxChars: number, mode: "head" | "tail"): string {
-	if (text.length <= maxChars) return text;
-	if (mode === "tail") {
-		return `[pruned: kept last ${maxChars}/${text.length} chars]\n${text.slice(-maxChars)}`;
-	}
-	return `${text.slice(0, maxChars)}\n[pruned: kept first ${maxChars}/${text.length} chars]`;
+function truncateText(
+  text: string,
+  maxChars: number,
+  mode: "head" | "tail",
+): string {
+  if (text.length <= maxChars) return text;
+  if (mode === "tail") {
+    return `[pruned: kept last ${maxChars}/${text.length} chars]\n${text.slice(-maxChars)}`;
+  }
+  return `${text.slice(0, maxChars)}\n[pruned: kept first ${maxChars}/${text.length} chars]`;
 }
 
 function approxTokens(messages: AgentMessage[]): number {
-	return messages.reduce((sum, m) => sum + estimateTokens(m), 0);
+  return messages.reduce((sum, m) => sum + estimateTokens(m), 0);
 }
 
 function getToolPath(args: unknown): string | undefined {
-	if (!args || typeof args !== "object" || !("path" in args)) return undefined;
-	const path = (args as { path?: unknown }).path;
-	return typeof path === "string" ? path : undefined;
+  if (!args || typeof args !== "object" || !("path" in args)) return undefined;
+  const path = (args as { path?: unknown }).path;
+  return typeof path === "string" ? path : undefined;
 }
 
 function matchesToolName(rule: ToolKeepRule, toolName: string): boolean {
-	if (typeof rule.tool !== "string") return rule.tool.test(toolName);
-	if (rule.tool.endsWith("*")) return toolName.startsWith(rule.tool.slice(0, -1));
-	return rule.tool === toolName;
+  if (typeof rule.tool !== "string") return rule.tool.test(toolName);
+  if (rule.tool.endsWith("*"))
+    return toolName.startsWith(rule.tool.slice(0, -1));
+  return rule.tool === toolName;
 }
 
-function matchesPathRule(rule: ToolKeepRule, path: string | undefined): boolean {
-	if (!rule.args) return true;
-	if (!path) return false;
-	const { pathEndsWith = [], pathIncludes = [] } = rule.args;
-	return pathEndsWith.some((suffix) => path.endsWith(suffix)) || pathIncludes.some((part) => path.includes(part));
+function matchesPathRule(
+  rule: ToolKeepRule,
+  path: string | undefined,
+): boolean {
+  if (!rule.args) return true;
+  if (!path) return false;
+  const { pathEndsWith = [], pathIncludes = [] } = rule.args;
+  return (
+    pathEndsWith.some((suffix) => path.endsWith(suffix)) ||
+    pathIncludes.some((part) => path.includes(part))
+  );
 }
 
 function getToolKeepRule(
-	part: AssistantMessage["content"][number],
-	config: PruneConfig,
+  part: AssistantMessage["content"][number],
+  config: PruneConfig,
 ): ToolKeepRule | undefined {
-	if (part.type !== "toolCall") return undefined;
-	const path = getToolPath(part.arguments);
-	return config.toolResultKeepRules.find(
-		(rule) => matchesToolName(rule, part.name) && matchesPathRule(rule, path),
-	);
+  if (part.type !== "toolCall") return undefined;
+  const path = getToolPath(part.arguments);
+  return config.toolResultKeepRules.find(
+    (rule) => matchesToolName(rule, part.name) && matchesPathRule(rule, path),
+  );
 }
 
-function isLoadedInstructionRead(part: AssistantMessage["content"][number]): boolean {
-	if (part.type !== "toolCall" || part.name !== "read") return false;
-	const path = getToolPath(part.arguments);
-	if (!path) return false;
-	return path.endsWith("/AGENTS.md") || path.endsWith("AGENTS.md") || path.endsWith("/SKILL.md");
+function isLoadedInstructionRead(
+  part: AssistantMessage["content"][number],
+): boolean {
+  if (part.type !== "toolCall" || part.name !== "read") return false;
+  const path = getToolPath(part.arguments);
+  if (!path) return false;
+  return (
+    path.endsWith("/AGENTS.md") ||
+    path.endsWith("AGENTS.md") ||
+    path.endsWith("/SKILL.md")
+  );
 }
 
 export function distillMessages(
-	messages: AgentMessage[],
-	config: PruneConfig,
+  messages: AgentMessage[],
+  config: PruneConfig,
 ): { messages: Message[]; stats: PruneStats } {
-	const result: Message[] = [];
-	const stats: PruneStats = {
-		sourceMessages: messages.length,
-		keptMessages: 0,
-		droppedMessages: 0,
-		sourceApproxTokens: approxTokens(messages),
-		keptApproxTokens: 0,
-	};
+  const result: Message[] = [];
+  const stats: PruneStats = {
+    sourceMessages: messages.length,
+    keptMessages: 0,
+    droppedMessages: 0,
+    sourceApproxTokens: approxTokens(messages),
+    keptApproxTokens: 0,
+  };
 
-	// Track which tool call IDs were kept, and their keep rules (for truncation).
-	const keptToolCallIds = new Map<string, { rule?: ToolKeepRule; unpruned: boolean }>();
+  // Track which tool call IDs were kept, and their keep rules (for truncation).
+  const keptToolCallIds = new Map<
+    string,
+    { rule?: ToolKeepRule; unpruned: boolean }
+  >();
 
-	for (const message of messages) {
-		if (isUser(message)) {
-			if (!config.includeUser) {
-				stats.droppedMessages++;
-				continue;
-			}
-			result.push({ ...message });
-			stats.keptMessages++;
-			continue;
-		}
+  for (const message of messages) {
+    if (isUser(message)) {
+      if (!config.includeUser) {
+        stats.droppedMessages++;
+        continue;
+      }
+      result.push({ ...message });
+      stats.keptMessages++;
+      continue;
+    }
 
-		if (isAssistant(message)) {
-			const hasToolCall = message.content.some((p) => p.type === "toolCall");
-			const kept: AssistantMessage["content"] = [];
+    if (isAssistant(message)) {
+      const hasToolCall = message.content.some((p) => p.type === "toolCall");
+      const kept: AssistantMessage["content"] = [];
 
-			// Clear old kept IDs — new assistant message starts a new round.
-			keptToolCallIds.clear();
+      // Clear old kept IDs — new assistant message starts a new round.
+      keptToolCallIds.clear();
 
-			for (const part of message.content) {
-				if (
-					part.type === "thinking" &&
-					config.includeAssistantThinking &&
-					trimText(part.thinking)
-				) {
-					kept.push({ ...part });
-				}
-				if (part.type === "text" && trimText(part.text)) {
-					if (hasToolCall && config.includeAssistantComment) kept.push({ ...part });
-					if (!hasToolCall && config.includeAssistantFinal) kept.push({ ...part });
-				}
-				if (
-					part.type === "toolCall" &&
-					(config.includeToolCalls ||
-						getToolKeepRule(part, config) ||
-						(config.includeLoadedInstructions && isLoadedInstructionRead(part)))
-				) {
-					kept.push(part);
-					// Record this tool call ID so we know to keep its result.
-					const rule = getToolKeepRule(part, config);
-					const unpruned = config.includeLoadedInstructions && isLoadedInstructionRead(part);
-					keptToolCallIds.set(part.id, { rule, unpruned });
-				}
-			}
+      for (const part of message.content) {
+        if (
+          part.type === "thinking" &&
+          config.includeAssistantThinking &&
+          trimText(part.thinking)
+        ) {
+          kept.push({ ...part });
+        }
+        if (part.type === "text" && trimText(part.text)) {
+          if (hasToolCall && config.includeAssistantComment)
+            kept.push({ ...part });
+          if (!hasToolCall && config.includeAssistantFinal)
+            kept.push({ ...part });
+        }
+        if (
+          part.type === "toolCall" &&
+          (config.includeToolCalls ||
+            getToolKeepRule(part, config) ||
+            (config.includeLoadedInstructions && isLoadedInstructionRead(part)))
+        ) {
+          kept.push(part);
+          // Record this tool call ID so we know to keep its result.
+          const rule = getToolKeepRule(part, config);
+          const unpruned =
+            config.includeLoadedInstructions && isLoadedInstructionRead(part);
+          keptToolCallIds.set(part.id, { rule, unpruned });
+        }
+      }
 
-			if (kept.length === 0) {
-				stats.droppedMessages++;
-				continue;
-			}
+      if (kept.length === 0) {
+        stats.droppedMessages++;
+        continue;
+      }
 
-			result.push({
-				...message,
-				content: kept,
-				usage: ZERO_USAGE,
-				stopReason: kept.some((p) => p.type === "toolCall") ? "toolUse" : "stop",
-				errorMessage: undefined,
-			});
-			stats.keptMessages++;
-			continue;
-		}
+      result.push({
+        ...message,
+        content: kept,
+        usage: ZERO_USAGE,
+        stopReason: kept.some((p) => p.type === "toolCall")
+          ? "toolUse"
+          : "stop",
+        errorMessage: undefined,
+      });
+      stats.keptMessages++;
+      continue;
+    }
 
-		if (isToolResult(message)) {
-			const keepInfo = keptToolCallIds.get(message.toolCallId);
-			const shouldKeep = config.includeToolResults || Boolean(keepInfo);
+    if (isToolResult(message)) {
+      const keepInfo = keptToolCallIds.get(message.toolCallId);
+      const shouldKeep = config.includeToolResults || Boolean(keepInfo);
 
-			if (!shouldKeep) {
-				stats.droppedMessages++;
-				continue;
-			}
+      if (!shouldKeep) {
+        stats.droppedMessages++;
+        continue;
+      }
 
-			let content = [...message.content];
-			const maxChars = keepInfo?.rule?.maxChars ?? config.toolResultMaxChars;
-			if (maxChars && !keepInfo?.unpruned) {
-				const images = content.filter((p): p is ImageContent => p.type === "image");
-				const text = content
-					.filter((p): p is TextContent => p.type === "text")
-					.map((p) => p.text)
-					.join("\n\n");
-				const truncated = truncateText(text, maxChars, config.toolResultTruncation);
-				content = [{ type: "text", text: truncated }, ...images];
-			}
+      let content = [...message.content];
+      const maxChars = keepInfo?.rule?.maxChars ?? config.toolResultMaxChars;
+      if (maxChars && !keepInfo?.unpruned) {
+        const images = content.filter(
+          (p): p is ImageContent => p.type === "image",
+        );
+        const text = content
+          .filter((p): p is TextContent => p.type === "text")
+          .map((p) => p.text)
+          .join("\n\n");
+        const truncated = truncateText(
+          text,
+          maxChars,
+          config.toolResultTruncation,
+        );
+        content = [{ type: "text", text: truncated }, ...images];
+      }
 
-			// Remove from kept set so each matched result consumes its ID once.
-			keptToolCallIds.delete(message.toolCallId);
-			result.push({ ...message, content, details: { __pruned: !keepInfo } });
-			stats.keptMessages++;
-			continue;
-		}
+      // Remove from kept set so each matched result consumes its ID once.
+      keptToolCallIds.delete(message.toolCallId);
+      result.push({ ...message, content, details: { __pruned: !keepInfo } });
+      stats.keptMessages++;
+      continue;
+    }
 
-		// Drop unknown message types
-		stats.droppedMessages++;
-	}
+    // Drop unknown message types
+    stats.droppedMessages++;
+  }
 
-	stats.keptApproxTokens = approxTokens(result as unknown as AgentMessage[]);
-	return { messages: result, stats };
+  stats.keptApproxTokens = approxTokens(result as unknown as AgentMessage[]);
+  return { messages: result, stats };
 }

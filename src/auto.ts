@@ -1,76 +1,77 @@
 export const DEFAULT_AUTO_THRESHOLD_PERCENT = 60;
 
 export interface AutoPruneConfig {
-	enabled: boolean;
-	thresholdPercent: number;
+  enabled: boolean;
+  thresholdPercent: number;
 }
 
 export interface AutoPruneDecision {
-	thresholdPercent: number;
-	usagePercent?: number;
-	shouldPrune: boolean;
-	reason: string;
+  thresholdPercent: number;
+  usagePercent?: number;
+  shouldPrune: boolean;
+  reason: string;
 }
 
 export function parseAutoThreshold(args: string): number | undefined {
-	const token = args.trim();
-	if (!token) return DEFAULT_AUTO_THRESHOLD_PERCENT;
+  const token = args.trim();
+  if (!token) return DEFAULT_AUTO_THRESHOLD_PERCENT;
 
-	const normalized = token.endsWith("%") ? token.slice(0, -1) : token;
-	const threshold = Number(normalized);
-	if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) return undefined;
+  const normalized = token.endsWith("%") ? token.slice(0, -1) : token;
+  const threshold = Number(normalized);
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100)
+    return undefined;
 
-	return threshold;
+  return threshold;
 }
 
 export function configureAutoPrune(args: string): AutoPruneConfig | undefined {
-	const threshold = parseAutoThreshold(args);
-	if (threshold === undefined) return undefined;
+  const threshold = parseAutoThreshold(args);
+  if (threshold === undefined) return undefined;
 
-	return {
-		enabled: threshold > 0,
-		thresholdPercent: threshold,
-	};
+  return {
+    enabled: threshold > 0,
+    thresholdPercent: threshold,
+  };
 }
 
 export function normalizeContextPercent(percent: number): number {
-	return percent <= 1 ? percent * 100 : percent;
+  return percent <= 1 ? percent * 100 : percent;
 }
 
 export function shouldAutoPrune(
-	usage: { percent?: number | null } | undefined,
-	config: AutoPruneConfig,
+  usage: { percent?: number | null } | undefined,
+  config: AutoPruneConfig,
 ): AutoPruneDecision {
-	if (!config.enabled) {
-		return {
-			thresholdPercent: config.thresholdPercent,
-			shouldPrune: false,
-			reason: "Auto-prune is disabled",
-		};
-	}
+  if (!config.enabled) {
+    return {
+      thresholdPercent: config.thresholdPercent,
+      shouldPrune: false,
+      reason: "Auto-prune is disabled",
+    };
+  }
 
-	if (!usage || usage.percent == null) {
-		return {
-			thresholdPercent: config.thresholdPercent,
-			shouldPrune: false,
-			reason: "Context usage is unavailable",
-		};
-	}
+  if (!usage || usage.percent == null) {
+    return {
+      thresholdPercent: config.thresholdPercent,
+      shouldPrune: false,
+      reason: "Context usage is unavailable",
+    };
+  }
 
-	const usagePercent = normalizeContextPercent(usage.percent);
-	if (usagePercent < config.thresholdPercent) {
-		return {
-			thresholdPercent: config.thresholdPercent,
-			usagePercent,
-			shouldPrune: false,
-			reason: `Context usage ${usagePercent.toFixed(1)}% is below ${config.thresholdPercent}%`,
-		};
-	}
+  const usagePercent = normalizeContextPercent(usage.percent);
+  if (usagePercent < config.thresholdPercent) {
+    return {
+      thresholdPercent: config.thresholdPercent,
+      usagePercent,
+      shouldPrune: false,
+      reason: `Context usage ${usagePercent.toFixed(1)}% is below ${config.thresholdPercent}%`,
+    };
+  }
 
-	return {
-		thresholdPercent: config.thresholdPercent,
-		usagePercent,
-		shouldPrune: true,
-		reason: `Context usage ${usagePercent.toFixed(1)}% reached ${config.thresholdPercent}%`,
-	};
+  return {
+    thresholdPercent: config.thresholdPercent,
+    usagePercent,
+    shouldPrune: true,
+    reason: `Context usage ${usagePercent.toFixed(1)}% reached ${config.thresholdPercent}%`,
+  };
 }
