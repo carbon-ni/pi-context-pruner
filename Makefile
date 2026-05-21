@@ -24,5 +24,9 @@ fix:
 	npx prettier . --write
 	npx eslint . --fix
 
+# Security audit
+audit:
+	npm audit
+
 clean:
 	rm -rf node_modules .tmp coverage
