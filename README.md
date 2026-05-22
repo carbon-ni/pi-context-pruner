@@ -6,6 +6,19 @@ Context bonsai for Pi: trim a noisy session into a focused memory branch that ca
 
 Based on [pi-reduce](https://github.com/maxjendrall/pi-reduce) — simplified for quick preset-driven usage.
 
+## Usage
+
+Periodically, run `/prune` to create a new session with the current context. That's enough for most use cases, but for more complex workflows see [Commands](#commands).
+For automatic pruning, see [Auto-prune](#auto-prune).
+
+## How it works
+
+1. Reads the current branch context.
+2. Filters messages by category: user, thinking, assistant text, tool calls, tool results.
+3. Keeps selected tool results by whitelist and truncates long text results.
+4. Creates a new child session with the reduced messages.
+5. Switches into the new session immediately.
+
 ## Commands
 
 | Command                 | Effect                                                                     |
@@ -18,14 +31,6 @@ Based on [pi-reduce](https://github.com/maxjendrall/pi-reduce) — simplified fo
 | `/prune pick`           | Choose a preset interactively                                              |
 | `/prune last`           | Rerun the last prune config                                                |
 | `/prune-auto [percent]` | Enable auto-prune at a context threshold; default `60`, `0` disables       |
-
-## How it works
-
-1. Reads the current branch context.
-2. Filters messages by category: user, thinking, assistant text, tool calls, tool results.
-3. Keeps selected tool results by whitelist and truncates long text results.
-4. Creates a new child session with the reduced messages.
-5. Switches into the new session immediately.
 
 ## Presets
 
@@ -106,13 +111,3 @@ npm test
 npm run check
 npm run lint
 ```
-
-Project shape:
-
-- `src/index.ts` — extension entrypoint and command registration
-- `src/distill.ts` — message filtering and truncation logic
-- `src/config.ts` — defaults, presets, and config loading
-- `src/auto.ts` — auto-prune threshold parsing and decision logic
-- `src/format.ts` — user-facing summary formatting
-- `src/types.ts` — shared types
-- `test/*.test.ts` — Vitest coverage for presets, config, auto-prune, session names, and distillation
