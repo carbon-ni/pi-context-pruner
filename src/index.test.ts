@@ -3,6 +3,7 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { describe, expect, it, vi } from "vitest";
 import contextPruneExtension from "./index.js";
 
@@ -13,76 +14,38 @@ type RegisteredCommand = {
 type RegisteredHandler = (
   event: unknown,
   ctx: ExtensionContext,
-) => Promise<void> | void;
+) => Promise<unknown> | unknown;
+
+function makeMessages(): AgentMessage[] {
+  return [
+    { role: "user", content: "Keep this request" } as AgentMessage,
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "I will inspect this." },
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "bash",
+          arguments: { command: "printf secret-tool-output" },
+        },
+      ],
+    } as AgentMessage,
+    {
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "bash",
+      content: [{ type: "text", text: "secret-tool-output" }],
+    } as AgentMessage,
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "Done" }],
+    } as AgentMessage,
+  ];
+}
 
 describe("/prune-auto extension flow", () => {
-  it("auto-prunes after a turn when context usage reaches the configured threshold", async () => {
-    const commands = new Map<string, RegisteredCommand>();
-    const handlers = new Map<string, RegisteredHandler>();
-    const pi = {
-      registerCommand: vi.fn((name, command) => commands.set(name, command)),
-      on: vi.fn((event, handler) => handlers.set(event, handler)),
-    };
-
-    contextPruneExtension(pi as unknown as ExtensionAPI);
-
-    const notify = vi.fn();
-    await commands.get("prune-auto")?.handler("70", {
-      hasUI: true,
-      ui: { notify },
-      getContextUsage: () => ({ percent: 50 }),
-    } as unknown as ExtensionCommandContext);
-
-    const pruneContext = vi.fn();
-    await handlers.get("turn_end")?.({ type: "turn_end" }, {
-      ui: { notify },
-      getContextUsage: () => ({ percent: 75 }),
-      compact: pruneContext,
-    } as unknown as ExtensionContext);
-
-    expect(pruneContext).toHaveBeenCalledOnce();
-    expect(pruneContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customInstructions: expect.stringContaining("Preserve user requests"),
-        onComplete: expect.any(Function),
-        onError: expect.any(Function),
-      }),
-    );
-  });
-
-  it("notifies when auto-prune compaction fails", async () => {
-    const commands = new Map<string, RegisteredCommand>();
-    const handlers = new Map<string, RegisteredHandler>();
-    const pi = {
-      registerCommand: vi.fn((name, command) => commands.set(name, command)),
-      on: vi.fn((event, handler) => handlers.set(event, handler)),
-    };
-
-    contextPruneExtension(pi as unknown as ExtensionAPI);
-
-    const notify = vi.fn();
-    await commands.get("prune-auto")?.handler("70", {
-      hasUI: true,
-      ui: { notify },
-      getContextUsage: () => ({ percent: 50 }),
-    } as unknown as ExtensionCommandContext);
-
-    const compact = vi.fn((options) => {
-      options.onError(new Error("model unavailable"));
-    });
-    await handlers.get("turn_end")?.({ type: "turn_end" }, {
-      ui: { notify },
-      getContextUsage: () => ({ percent: 75 }),
-      compact,
-    } as unknown as ExtensionContext);
-
-    expect(notify).toHaveBeenCalledWith(
-      "Auto-prune failed: model unavailable",
-      "error",
-    );
-  });
-
-  it("uses turn-end compaction so Pi keeps recent tool context", async () => {
+  it("automatically applies deterministic prune logic to provider context after threshold", async () => {
     const commands = new Map<string, RegisteredCommand>();
     const handlers = new Map<string, RegisteredHandler>();
     const pi = {
@@ -100,31 +63,53 @@ describe("/prune-auto extension flow", () => {
     } as unknown as ExtensionCommandContext);
 
     const compact = vi.fn();
-    await handlers.get("turn_end")?.(
-      {
-        type: "turn_end",
-        turnIndex: 0,
-        message: { role: "assistant", content: "", toolCalls: [] },
-        toolResults: [
-          {
-            role: "toolResult",
-            toolCallId: "call-1",
-            content: "important output",
-          },
-        ],
-      },
+    await handlers.get("turn_end")?.({ type: "turn_end" }, {
+      ui: { notify },
+      getContextUsage: () => ({ percent: 75 }),
+      compact,
+    } as unknown as ExtensionContext);
+
+    const result = (await handlers.get("context")?.(
+      { type: "context", messages: makeMessages() },
       {
         ui: { notify },
         getContextUsage: () => ({ percent: 75 }),
         compact,
       } as unknown as ExtensionContext,
+    )) as { messages: AgentMessage[] };
+
+    expect(compact).not.toHaveBeenCalled();
+    expect(result.messages.length).toBeLessThan(makeMessages().length);
+    expect(JSON.stringify(result.messages)).not.toContain("secret-tool-output");
+  });
+
+  it("does not alter provider context while auto-prune is below threshold", async () => {
+    const commands = new Map<string, RegisteredCommand>();
+    const handlers = new Map<string, RegisteredHandler>();
+    const pi = {
+      registerCommand: vi.fn((name, command) => commands.set(name, command)),
+      on: vi.fn((event, handler) => handlers.set(event, handler)),
+    };
+
+    contextPruneExtension(pi as unknown as ExtensionAPI);
+
+    const notify = vi.fn();
+    await commands.get("prune-auto")?.handler("70", {
+      hasUI: true,
+      ui: { notify },
+      getContextUsage: () => ({ percent: 50 }),
+    } as unknown as ExtensionCommandContext);
+
+    const messages = makeMessages();
+    const result = await handlers.get("context")?.(
+      { type: "context", messages },
+      {
+        ui: { notify },
+        getContextUsage: () => ({ percent: 50 }),
+        compact: vi.fn(),
+      } as unknown as ExtensionContext,
     );
 
-    expect(compact).toHaveBeenCalledOnce();
-    expect(compact).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customInstructions: expect.stringContaining("Preserve user requests"),
-      }),
-    );
+    expect(result).toBeUndefined();
   });
 });

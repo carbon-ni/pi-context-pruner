@@ -23,13 +23,8 @@ interface PruneState {
   lastConfig: PruneConfig;
   lastPreset?: PrunePreset;
   auto: AutoPruneConfig;
+  autoPruneActive: boolean;
 }
-
-const AUTO_PRUNE_INSTRUCTIONS = [
-  "Preserve user requests, assistant conclusions, and important reasoning.",
-  "Drop verbose tool traces and redundant intermediate details.",
-  "Keep enough context to continue the current task safely.",
-].join(" ");
 
 const PRUNE_MARKER_PATTERN = /prune:[^\]\s]+(?:\s·\s×(\d+)\s·\s-\d+%)?/g;
 const PRUNE_SUFFIX_PATTERN = /\s+\[prune:[^\]]+\]$/;
@@ -136,6 +131,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
   let state: PruneState = {
     lastConfig: cloneConfig(defaultConfig),
     auto: { enabled: false, thresholdPercent: 0 },
+    autoPruneActive: false,
   };
 
   const getMessages = (ctx: ExtensionCommandContext) => {
@@ -188,6 +184,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
   ) => {
     const decision = shouldAutoPrune(ctx.getContextUsage(), state.auto);
     if (!decision.shouldPrune) {
+      state = { ...state, autoPruneActive: false };
       if (notifyWhenSkipped) {
         ctx.ui.notify(
           `Auto-prune enabled at ${state.auto.thresholdPercent}%. ${decision.reason}`,
@@ -197,20 +194,25 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
       return;
     }
 
-    ctx.ui.notify(`${decision.reason}; pruning context`, "info");
-    ctx.compact({
-      customInstructions: AUTO_PRUNE_INSTRUCTIONS,
-      onComplete: () => {
-        ctx.ui.notify("Auto-prune completed", "info");
-      },
-      onError: (error) => {
-        ctx.ui.notify(`Auto-prune failed: ${error.message}`, "error");
-      },
-    });
+    state = { ...state, autoPruneActive: true };
+    ctx.ui.notify(
+      `${decision.reason}; applying deterministic auto-prune`,
+      "info",
+    );
   };
 
   pi.on("turn_end", async (_event, ctx) => {
     pruneIfAutoThresholdReached(ctx, false);
+  });
+
+  pi.on("context", (event) => {
+    if (!state.autoPruneActive) return;
+
+    const config = cloneConfig(presets.reasoning.config);
+    const { messages } = distillMessages(event.messages, config);
+    if (messages.length === 0) return;
+
+    return { messages };
   });
 
   pi.registerCommand("prune", {
@@ -304,7 +306,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
         return;
       }
 
-      state = { ...state, auto };
+      state = { ...state, auto, autoPruneActive: false };
       if (!auto.enabled) {
         ctx.ui.notify("Auto-prune disabled", "info");
         return;
