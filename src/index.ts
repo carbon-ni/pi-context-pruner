@@ -198,10 +198,18 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
     }
 
     ctx.ui.notify(`${decision.reason}; pruning context`, "info");
-    ctx.compact({ customInstructions: AUTO_PRUNE_INSTRUCTIONS });
+    ctx.compact({
+      customInstructions: AUTO_PRUNE_INSTRUCTIONS,
+      onComplete: () => {
+        ctx.ui.notify("Auto-prune completed", "info");
+      },
+      onError: (error) => {
+        ctx.ui.notify(`Auto-prune failed: ${error.message}`, "error");
+      },
+    });
   };
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("turn_end", async (_event, ctx) => {
     pruneIfAutoThresholdReached(ctx, false);
   });
 
