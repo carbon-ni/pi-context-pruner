@@ -56,15 +56,21 @@ describe("/prune-auto extension flow", () => {
     contextPruneExtension(pi as unknown as ExtensionAPI);
 
     const notify = vi.fn();
+    const setStatus = vi.fn();
     await commands.get("prune-auto")?.handler("70", {
       hasUI: true,
-      ui: { notify },
+      ui: { notify, setStatus },
       getContextUsage: () => ({ percent: 50 }),
     } as unknown as ExtensionCommandContext);
 
+    expect(setStatus).toHaveBeenLastCalledWith(
+      "context-pruner",
+      "prune:auto 70% · 20.0% left",
+    );
+
     const compact = vi.fn();
     await handlers.get("turn_end")?.({ type: "turn_end" }, {
-      ui: { notify },
+      ui: { notify, setStatus },
       getContextUsage: () => ({ percent: 75 }),
       compact,
     } as unknown as ExtensionContext);
@@ -72,7 +78,7 @@ describe("/prune-auto extension flow", () => {
     const result = (await handlers.get("context")?.(
       { type: "context", messages: makeMessages() },
       {
-        ui: { notify },
+        ui: { notify, setStatus },
         getContextUsage: () => ({ percent: 75 }),
         compact,
       } as unknown as ExtensionContext,
@@ -94,9 +100,10 @@ describe("/prune-auto extension flow", () => {
     contextPruneExtension(pi as unknown as ExtensionAPI);
 
     const notify = vi.fn();
+    const setStatus = vi.fn();
     await commands.get("prune-auto")?.handler("70", {
       hasUI: true,
-      ui: { notify },
+      ui: { notify, setStatus },
       getContextUsage: () => ({ percent: 50 }),
     } as unknown as ExtensionCommandContext);
 
@@ -104,7 +111,7 @@ describe("/prune-auto extension flow", () => {
     const result = await handlers.get("context")?.(
       { type: "context", messages },
       {
-        ui: { notify },
+        ui: { notify, setStatus },
         getContextUsage: () => ({ percent: 50 }),
         compact: vi.fn(),
       } as unknown as ExtensionContext,

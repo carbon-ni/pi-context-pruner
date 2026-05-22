@@ -38,6 +38,22 @@ export function normalizeContextPercent(percent: number): number {
   return percent <= 1 ? percent * 100 : percent;
 }
 
+export function formatAutoPruneStatus(
+  usage: { percent?: number | null } | undefined,
+  config: AutoPruneConfig,
+): string | undefined {
+  if (!config.enabled) return undefined;
+  if (!usage || usage.percent == null)
+    return `prune:auto ${config.thresholdPercent}%`;
+
+  const usagePercent = normalizeContextPercent(usage.percent);
+  const remainingPercent = Math.max(config.thresholdPercent - usagePercent, 0);
+  if (remainingPercent === 0)
+    return `prune:auto ${config.thresholdPercent}% · reached`;
+
+  return `prune:auto ${config.thresholdPercent}% · ${remainingPercent.toFixed(1)}% left`;
+}
+
 export function shouldAutoPrune(
   usage: { percent?: number | null } | undefined,
   config: AutoPruneConfig,

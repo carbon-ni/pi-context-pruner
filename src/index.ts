@@ -14,6 +14,7 @@ import { distillMessages } from "./distill.js";
 import { compactSummary, configSummary, statsSummary } from "./format.js";
 import {
   configureAutoPrune,
+  formatAutoPruneStatus,
   shouldAutoPrune,
   type AutoPruneConfig,
 } from "./auto.js";
@@ -178,11 +179,19 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
     await runPreset(preset, ctx);
   };
 
+  const updateAutoPruneStatus = (ctx: ExtensionContext) => {
+    ctx.ui.setStatus(
+      "context-pruner",
+      formatAutoPruneStatus(ctx.getContextUsage(), state.auto),
+    );
+  };
+
   const pruneIfAutoThresholdReached = (
     ctx: ExtensionContext,
     notifyWhenSkipped: boolean,
   ) => {
     const decision = shouldAutoPrune(ctx.getContextUsage(), state.auto);
+    updateAutoPruneStatus(ctx);
     if (!decision.shouldPrune) {
       state = { ...state, autoPruneActive: false };
       if (notifyWhenSkipped) {
@@ -308,6 +317,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
 
       state = { ...state, auto, autoPruneActive: false };
       if (!auto.enabled) {
+        ctx.ui.setStatus("context-pruner", undefined);
         ctx.ui.notify("Auto-prune disabled", "info");
         return;
       }

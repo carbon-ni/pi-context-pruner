@@ -4,6 +4,7 @@ import {
   configureAutoPrune,
   normalizeContextPercent,
   parseAutoThreshold,
+  formatAutoPruneStatus,
   shouldAutoPrune,
 } from "./auto.js";
 
@@ -39,6 +40,32 @@ describe("configureAutoPrune", () => {
       enabled: false,
       thresholdPercent: 0,
     });
+  });
+});
+
+describe("formatAutoPruneStatus", () => {
+  it("shows threshold and remaining context before auto-prune", () => {
+    expect(
+      formatAutoPruneStatus(
+        { percent: 50 },
+        { enabled: true, thresholdPercent: 70 },
+      ),
+    ).toBe("prune:auto 70% · 20.0% left");
+  });
+
+  it("shows threshold when usage is unavailable", () => {
+    expect(
+      formatAutoPruneStatus(undefined, { enabled: true, thresholdPercent: 70 }),
+    ).toBe("prune:auto 70%");
+  });
+
+  it("clears status when auto-prune is disabled", () => {
+    expect(
+      formatAutoPruneStatus(
+        { percent: 50 },
+        { enabled: false, thresholdPercent: 0 },
+      ),
+    ).toBeUndefined();
   });
 });
 
