@@ -25,6 +25,7 @@ interface PruneState {
   lastPreset?: PrunePreset;
   auto: AutoPruneConfig;
   autoPruneActive: boolean;
+  autoCompacting: boolean;
 }
 
 const PRUNE_MARKER_PATTERN = /prune:[^\]\s]+(?:\s·\s×(\d+)\s·\s-\d+%)?/g;
@@ -133,6 +134,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
     lastConfig: cloneConfig(defaultConfig),
     auto: { enabled: false, thresholdPercent: 0 },
     autoPruneActive: false,
+    autoCompacting: false,
   };
 
   const getMessages = (ctx: ExtensionCommandContext) => {
@@ -193,7 +195,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
     const decision = shouldAutoPrune(ctx.getContextUsage(), state.auto);
     updateAutoPruneStatus(ctx);
     if (!decision.shouldPrune) {
-      state = { ...state, autoPruneActive: false };
+      state = { ...state, autoPruneActive: false, autoCompacting: false };
       if (notifyWhenSkipped) {
         ctx.ui.notify(
           `Auto-prune enabled at ${state.auto.thresholdPercent}%. ${decision.reason}`,
@@ -203,11 +205,24 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
       return;
     }
 
-    state = { ...state, autoPruneActive: true };
-    ctx.ui.notify(
-      `${decision.reason}; applying deterministic auto-prune`,
-      "info",
-    );
+    if (state.autoCompacting) return;
+
+    state = { ...state, autoPruneActive: false, autoCompacting: true };
+    ctx.ui.notify(`${decision.reason}; compacting with reasoning prune`, "info");
+    ctx.compact({
+      customInstructions:
+        "Apply a reasoning prune: preserve the active task, user intent, decisions, current files, errors, and next steps. Do not preserve verbose tool outputs or stale context unless still needed.",
+      onComplete: () => {
+        state = { ...state, autoCompacting: false };
+        ctx.ui.notify("Auto-prune compaction completed", "info");
+        updateAutoPruneStatus(ctx);
+      },
+      onError: (error) => {
+        state = { ...state, autoCompacting: false };
+        ctx.ui.notify(`Auto-prune compaction failed: ${error.message}`, "error");
+        updateAutoPruneStatus(ctx);
+      },
+    });
   };
 
   pi.on("turn_end", async (_event, ctx) => {

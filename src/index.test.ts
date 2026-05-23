@@ -45,7 +45,7 @@ function makeMessages(): AgentMessage[] {
 }
 
 describe("/prune-auto extension flow", () => {
-  it("automatically applies deterministic prune logic to provider context after threshold", async () => {
+  it("triggers compaction instead of rewriting provider context after threshold", async () => {
     const commands = new Map<string, RegisteredCommand>();
     const handlers = new Map<string, RegisteredHandler>();
     const pi = {
@@ -84,9 +84,12 @@ describe("/prune-auto extension flow", () => {
       } as unknown as ExtensionContext,
     )) as { messages: AgentMessage[] };
 
-    expect(compact).not.toHaveBeenCalled();
-    expect(result.messages.length).toBeLessThan(makeMessages().length);
-    expect(JSON.stringify(result.messages)).not.toContain("secret-tool-output");
+    expect(compact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customInstructions: expect.stringContaining("reasoning prune"),
+      }),
+    );
+    expect(result).toBeUndefined();
   });
 
   it("does not alter provider context while auto-prune is below threshold", async () => {
