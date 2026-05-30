@@ -11,7 +11,13 @@ import {
   parsePreset,
 } from "./config.js";
 import { distillMessages } from "./distill.js";
-import { compactSummary, configSummary, statsSummary } from "./format.js";
+import { auditContext } from "./audit.js";
+import {
+  auditSummary,
+  compactSummary,
+  configSummary,
+  statsSummary,
+} from "./format.js";
 import {
   configureAutoPrune,
   formatAutoPruneStatus,
@@ -208,7 +214,10 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
     if (state.autoCompacting) return;
 
     state = { ...state, autoPruneActive: false, autoCompacting: true };
-    ctx.ui.notify(`${decision.reason}; compacting with reasoning prune`, "info");
+    ctx.ui.notify(
+      `${decision.reason}; compacting with reasoning prune`,
+      "info",
+    );
     ctx.compact({
       customInstructions:
         "Apply a reasoning prune: preserve the active task, user intent, decisions, current files, errors, and next steps. Do not preserve verbose tool outputs or stale context unless still needed.",
@@ -219,7 +228,10 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
       },
       onError: (error) => {
         state = { ...state, autoCompacting: false };
-        ctx.ui.notify(`Auto-prune compaction failed: ${error.message}`, "error");
+        ctx.ui.notify(
+          `Auto-prune compaction failed: ${error.message}`,
+          "error",
+        );
         updateAutoPruneStatus(ctx);
       },
     });
@@ -338,6 +350,17 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
       }
 
       pruneIfAutoThresholdReached(ctx, true);
+    },
+  });
+
+  pi.registerCommand("prune-stats", {
+    description:
+      "Analyze current context token breakdown (initial setup vs conversation)",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      const messages = getMessages(ctx);
+      const systemPrompt = ctx.getSystemPrompt();
+      const report = auditContext({ systemPrompt, messages });
+      ctx.ui.notify(auditSummary(report), "info");
     },
   });
 }
