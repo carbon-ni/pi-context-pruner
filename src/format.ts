@@ -90,6 +90,19 @@ export function auditSummary(report: AuditReport): string {
     );
   }
 
+  if (report.duplicates.length > 0) {
+    lines.push("");
+    lines.push("Duplicate Initial Context:");
+    for (const group of report.duplicates) {
+      lines.push(
+        `  wasted ~${formatInt(group.wastedTokens)} tokens across ${group.labels.length} duplicates`,
+      );
+      for (const label of group.labels) {
+        lines.push(`    - ${label}`);
+      }
+    }
+  }
+
   if (report.topConsumers.length > 0) {
     lines.push("");
     lines.push("Top Consumers:");

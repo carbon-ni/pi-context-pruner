@@ -26,6 +26,12 @@ export interface AuditSavings {
   reasoningPreset: { tokens: number; percent: number };
 }
 
+export interface AuditDuplicateGroup {
+  labels: string[];
+  tokens: number;
+  wastedTokens: number;
+}
+
 export interface AuditReport {
   totalTokens: number;
   initialTokens: number;
@@ -33,6 +39,7 @@ export interface AuditReport {
   totalMessages: number;
   breakdown: AuditBreakdown[];
   topConsumers: AuditTopConsumer[];
+  duplicates: AuditDuplicateGroup[];
   savings?: AuditSavings;
 }
 
@@ -66,6 +73,19 @@ interface PromptSection {
   label: string;
   category: string;
   tokens: number;
+  content: string;
+  start?: number;
+  end?: number;
+}
+
+export interface DedupeSystemPromptResult {
+  systemPrompt: string;
+  removedTokens: number;
+  duplicates: AuditDuplicateGroup[];
+}
+
+function normalizeSectionContent(content: string): string {
+  return content.split("\n").slice(1).join("\n").trim().replace(/\s+/g, " ");
 }
 
 function parseSystemPromptSections(prompt: string): PromptSection[] {
@@ -90,6 +110,7 @@ function parseSystemPromptSections(prompt: string): PromptSection[] {
       label: "system_prompt (base)",
       category: "system_prompt",
       tokens: tokensForText(baseText),
+      content: baseText,
     });
   }
 
@@ -118,6 +139,9 @@ function parseSystemPromptSections(prompt: string): PromptSection[] {
           label: entry.filePath,
           category: "system_prompt",
           tokens: tokensForText(content),
+          content,
+          start: ctxStart + entry.start,
+          end: ctxStart + entry.end,
         });
       }
     }
@@ -130,6 +154,7 @@ function parseSystemPromptSections(prompt: string): PromptSection[] {
           label: "project_context (header)",
           category: "system_prompt",
           tokens: tokensForText(preamble),
+          content: preamble,
         });
       }
     }
@@ -151,6 +176,7 @@ function parseSystemPromptSections(prompt: string): PromptSection[] {
           label: "skills (header)",
           category: "system_prompt",
           tokens: tokensForText(headerText),
+          content: headerText,
         });
       }
     }
@@ -162,6 +188,7 @@ function parseSystemPromptSections(prompt: string): PromptSection[] {
         label: "skills (list)",
         category: "system_prompt",
         tokens: tokensForText(skillEntries),
+        content: skillEntries,
       });
     }
   }
@@ -185,11 +212,72 @@ function parseSystemPromptSections(prompt: string): PromptSection[] {
         label: "system_prompt (trailing)",
         category: "system_prompt",
         tokens: tokensForText(trailing),
+        content: trailing,
       });
     }
   }
 
   return sections;
+}
+
+function findDuplicateSections(
+  sections: PromptSection[],
+): AuditDuplicateGroup[] {
+  const byContent = new Map<string, PromptSection[]>();
+  for (const section of sections) {
+    if (!section.label.includes("/")) continue;
+    const normalized = normalizeSectionContent(section.content);
+    if (!normalized) continue;
+    byContent.set(normalized, [...(byContent.get(normalized) ?? []), section]);
+  }
+
+  return Array.from(byContent.values())
+    .filter((group) => group.length > 1)
+    .map((group) => {
+      const tokens = group.reduce((sum, section) => sum + section.tokens, 0);
+      const keptTokens = group[0].tokens;
+      return {
+        labels: group.map((section) => section.label),
+        tokens,
+        wastedTokens: Math.max(0, tokens - keptTokens),
+      };
+    })
+    .sort((a, b) => b.wastedTokens - a.wastedTokens);
+}
+
+export function dedupeSystemPrompt(prompt: string): DedupeSystemPromptResult {
+  const sections = parseSystemPromptSections(prompt);
+  const duplicates = findDuplicateSections(sections);
+  if (duplicates.length === 0) {
+    return { systemPrompt: prompt, removedTokens: 0, duplicates };
+  }
+
+  const duplicateLabels = new Set(
+    duplicates.flatMap((group) => group.labels.slice(1)),
+  );
+  const removals = sections
+    .filter(
+      (section) =>
+        duplicateLabels.has(section.label) &&
+        section.start !== undefined &&
+        section.end !== undefined,
+    )
+    .sort((a, b) => (b.start ?? 0) - (a.start ?? 0));
+
+  let systemPrompt = prompt;
+  for (const section of removals) {
+    systemPrompt =
+      systemPrompt.slice(0, section.start) + systemPrompt.slice(section.end);
+  }
+
+  return {
+    systemPrompt,
+    removedTokens: duplicates.reduce(
+      (sum, group) => sum + group.wastedTokens,
+      0,
+    ),
+    duplicates,
+  };
 }
 
 export function auditContext(input: AuditInput): AuditReport {
@@ -204,6 +292,7 @@ export function auditContext(input: AuditInput): AuditReport {
       totalMessages: 0,
       breakdown: [],
       topConsumers: [],
+      duplicates: [],
     };
   }
 
@@ -221,11 +310,11 @@ export function auditContext(input: AuditInput): AuditReport {
   const toolCallPathMap = new Map<string, string>();
 
   // Parse system prompt into named sections
-  if (systemPrompt) {
-    const sections = parseSystemPromptSections(systemPrompt);
-    for (const section of sections) {
-      addToBucket(section.label, section.category, section.tokens);
-    }
+  const promptSections = systemPrompt
+    ? parseSystemPromptSections(systemPrompt)
+    : [];
+  for (const section of promptSections) {
+    addToBucket(section.label, section.category, section.tokens);
   }
 
   // Track top consumers per message
@@ -428,6 +517,7 @@ export function auditContext(input: AuditInput): AuditReport {
     totalMessages,
     breakdown,
     topConsumers,
+    duplicates: findDuplicateSections(promptSections),
     savings,
   };
 }

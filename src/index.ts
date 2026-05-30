@@ -11,7 +11,7 @@ import {
   parsePreset,
 } from "./config.js";
 import { distillMessages } from "./distill.js";
-import { auditContext } from "./audit.js";
+import { auditContext, dedupeSystemPrompt } from "./audit.js";
 import {
   auditSummary,
   compactSummary,
@@ -32,6 +32,7 @@ interface PruneState {
   auto: AutoPruneConfig;
   autoPruneActive: boolean;
   autoCompacting: boolean;
+  dedupeInitialContext: boolean;
 }
 
 const PRUNE_MARKER_PATTERN = /prune:[^\]\s]+(?:\s·\s×(\d+)\s·\s-\d+%)?/g;
@@ -141,6 +142,7 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
     auto: { enabled: false, thresholdPercent: 0 },
     autoPruneActive: false,
     autoCompacting: false,
+    dedupeInitialContext: false,
   };
 
   const getMessages = (ctx: ExtensionCommandContext) => {
@@ -249,6 +251,15 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
     if (messages.length === 0) return;
 
     return { messages };
+  });
+
+  pi.on("before_agent_start", (event) => {
+    if (!state.dedupeInitialContext) return;
+
+    const result = dedupeSystemPrompt(event.systemPrompt);
+    if (result.removedTokens <= 0) return;
+
+    return { systemPrompt: result.systemPrompt };
   });
 
   pi.registerCommand("prune", {
@@ -361,6 +372,39 @@ export default function contextPruneExtension(pi: ExtensionAPI) {
       const systemPrompt = ctx.getSystemPrompt();
       const report = auditContext({ systemPrompt, messages });
       ctx.ui.notify(auditSummary(report), "info");
+    },
+  });
+
+  pi.registerCommand("prune-dedup", {
+    description:
+      "Enable duplicate initial-context removal (usage: /prune-dedup [on|off|status])",
+    getArgumentCompletions: (prefix: string) => {
+      const options = ["on", "off", "status"];
+      const filtered = options.filter((o) => o.startsWith(prefix.trim()));
+      return filtered.length > 0
+        ? filtered.map((value) => ({ value, label: value }))
+        : null;
+    },
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      const value = args.trim().toLowerCase() || "status";
+      if (value === "status") {
+        ctx.ui.notify(
+          `Initial context dedup is ${state.dedupeInitialContext ? "on" : "off"}`,
+          "info",
+        );
+        return;
+      }
+
+      if (value !== "on" && value !== "off") {
+        ctx.ui.notify("Usage: /prune-dedup [on|off|status]", "warning");
+        return;
+      }
+
+      state = { ...state, dedupeInitialContext: value === "on" };
+      ctx.ui.notify(
+        `Initial context dedup ${state.dedupeInitialContext ? "enabled" : "disabled"}`,
+        "info",
+      );
     },
   });
 }

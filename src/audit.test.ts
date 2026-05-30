@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { auditContext, type AuditInput, type AuditReport } from "./audit.js";
+import {
+  auditContext,
+  dedupeSystemPrompt,
+  type AuditInput,
+  type AuditReport,
+} from "./audit.js";
 import type { AgentMessage } from "./types.js";
 
 function makeUser(text: string): AgentMessage {
@@ -286,6 +291,49 @@ describe("auditContext", () => {
     // All tokens add up
     const sumBreakdown = report.breakdown.reduce((s, b) => s + b.tokens, 0);
     expect(sumBreakdown).toBe(report.totalTokens);
+  });
+
+  it("reports duplicate system prompt sections", () => {
+    const duplicated = "same instruction body".repeat(20);
+    const report = auditContext({
+      systemPrompt: [
+        "base",
+        "# Project Context",
+        "## /one/AGENTS.md",
+        duplicated,
+        "## /two/AGENTS.md",
+        duplicated,
+      ].join("\n"),
+      messages: [makeUser("hello")],
+    });
+
+    expect(report.duplicates).toHaveLength(1);
+    expect(report.duplicates[0].labels).toEqual([
+      "/one/AGENTS.md",
+      "/two/AGENTS.md",
+    ]);
+    expect(report.duplicates[0].wastedTokens).toBeGreaterThan(0);
+  });
+
+  it("deduplicates repeated system prompt sections by content", () => {
+    const duplicated = "same instruction body".repeat(20);
+    const prompt = [
+      "base",
+      "# Project Context",
+      "## /one/AGENTS.md",
+      duplicated,
+      "## /two/AGENTS.md",
+      duplicated,
+      "<available_skills>",
+      "</available_skills>",
+    ].join("\n");
+
+    const result = dedupeSystemPrompt(prompt);
+
+    expect(result.removedTokens).toBeGreaterThan(0);
+    expect(result.systemPrompt).toContain("## /one/AGENTS.md");
+    expect(result.systemPrompt).not.toContain("## /two/AGENTS.md");
+    expect(result.systemPrompt).toContain("<available_skills>");
   });
 
   it("computes savings for reasoning preset", () => {
